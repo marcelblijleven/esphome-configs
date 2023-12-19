@@ -1,0 +1,172 @@
+substitutions:
+  hostname: ventilatie
+  device_name: Ventilatie
+  device_id: ventilatie
+
+esphome:
+  name: ventilatie
+  comment: Zehnder ventilatie aansturen
+
+esp32:
+  board: nodemcu-32s
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+  level: DEBUG
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret ventilation_ha_encryption_key
+
+  services:
+    - service: set_speed
+      variables:
+        run_speed: int
+        run_time: int
+      then:
+        - lambda: |-
+            ${device_id}_ventilation->setSpeed(run_speed, run_time);
+
+ota:
+  password: !secret ventilation_ota_password
+
+wifi:
+  use_address: !secret ventilation_ip
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: light
+  manual_ip:
+    static_ip: !secret ventilation_ip
+    gateway: !secret ventilation_gateway
+    subnet: !secret ventilation_subnet_mask
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Ventilatie Fallback Hotspot"
+    password: !secret ventilation_fallback_password
+
+captive_portal:
+
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+    timezone: Europe/Amsterdam
+
+binary_sensor:
+  - platform: template
+    name: "${device_name} Timer"
+    id: "${device_id}_timer"
+    icon: mdi:fan-clock
+
+sensor:
+  - platform: template
+    name: "${device_name} Ventilation Percentage"
+    id: "${device_id}_ventilation_percentage"
+    state_class: measurement
+    unit_of_measurement: '%'
+    icon: mdi:percent
+    accuracy_decimals: 0
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "${device_name} IP Address"
+    ssid:
+      name: "${device_name} SSID"
+    bssid:
+      name: "${device_name} BSSID"
+    mac_address:
+      name: "${device_name} MAC"
+  - platform: template
+    name: "${device_name} Ventilation Mode"
+    id: "${device_id}_ventilation_mode"
+    icon: mdi:information
+
+button:
+  - platform: restart
+    id: ${hostname}_esphome_restart
+    name: ${device_name} herstart
+  - platform: template
+    id: ${hostname}_auto
+    name: ${device_name} Auto
+    icon: mdi:fan-auto
+    on_press:
+      then:
+        lambda: |-
+          ${device_id}_ventilation->setSpeed(0, 0);
+
+  - platform: template
+    id: ${hostname}_high_10
+    name: ${device_name} High 10
+    icon: mdi:fan-speed-3
+    on_press:
+      then:
+        lambda: |-
+          ${device_id}_ventilation->setSpeed(3, 10);
+
+  - platform: template
+    id: ${hostname}_high_30
+    name: ${device_name} High 30
+    icon: mdi:fan-speed-3
+    on_press:
+      then:
+        lambda: |-
+          ${device_id}_ventilation->setSpeed(3, 30);
+
+  - platform: template
+    id: ${hostname}_high_60
+    name: ${device_name} High 60
+    icon: mdi:fan-speed-3
+    on_press:
+      then:
+        lambda: |-
+          ${device_id}_ventilation->setSpeed(3, 60);
+
+# Load external components
+external_components:
+  - source:
+      type: git
+      url: https://github.com/marcelblijleven/ESPHome-Zehnder-RF.git
+      ref: main
+    components: [ nrf905, zehnder ]
+
+# The FAN controller
+fan:
+  - platform: zehnder
+    id: ${device_id}_ventilation
+    name: "${device_name} Ventilation"
+    nrf905: nrf905_rf
+    update_interval: "60s"
+    on_speed_set:
+      - sensor.template.publish:
+          id: ${device_id}_ventilation_percentage
+          state: !lambda 'return ${device_id}_ventilation->voltage;'
+      - text_sensor.template.publish:
+          id: ${device_id}_ventilation_mode
+          state: !lambda 'switch (${device_id}_ventilation->speed) {
+                             case 1: return "Low";
+                             case 2: return "Medium";
+                             case 3: return "High";
+                             case 4: return "Max";
+                             default: return "Auto";
+                         }'
+# SPI
+spi:
+  clk_pin: GPIO14
+  mosi_pin: GPIO13
+  miso_pin: GPIO12
+
+# nRF905 config
+nrf905:
+  id: "nrf905_rf"
+  cs_pin: GPIO15
+  cd_pin: GPIO33
+  ce_pin: GPIO27
+  pwr_pin: GPIO26
+  txen_pin: GPIO25
+  # We don't need AM and DR at the moment as they are read from the internal registers
+  am_pin: GPIO32
+  dr_pin: GPIO35
